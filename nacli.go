@@ -2,11 +2,13 @@ package main
 
 import (
 	"bufio"
-	"github.com/jawher/mow.cli"
-	"github.com/nats-io/go-nats"
 	"log"
 	"os"
 	"strings"
+
+	"github.com/google/uuid"
+	"github.com/jawher/mow.cli"
+	"github.com/nats-io/go-nats"
 )
 
 func main() {
@@ -75,7 +77,7 @@ func subscribe(brokers []string, subject string) {
 	}
 
 	log.Printf("Subscribing to subject '%v'\n", subject)
-	natsConnection.Subscribe(subject, func(msg *nats.Msg) {
+	natsConnection.QueueSubscribe(subject, uuid.New().String(), func(msg *nats.Msg) {
 		log.Printf("%s\n", string(msg.Data))
 	})
 }
