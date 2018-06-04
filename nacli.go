@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"log"
 	"os"
-	"strings"
 
 	"github.com/google/uuid"
 	"github.com/jawher/mow.cli"
@@ -20,14 +19,14 @@ func main() {
 
 func setupSubscriber(app *cli.Cli) {
 	app.Command("sub", "subscribe to a topic", func(cmd *cli.Cmd) {
-		app.Spec = "--subject, --brokers"
+		app.Spec = "--subject, --brokerURL"
 		subject := cmd.String(cli.StringOpt{
 			Name: "subject, s",
 			Desc: "Subject to subscribe to",
 		})
 
-		brokers := cmd.Strings(cli.StringsOpt{
-			Name: "brokers, b",
+		brokers := cmd.String(cli.StringOpt{
+			Name: "brokerURL, b",
 			Desc: "Brokers to connect to",
 		})
 		cmd.Action = func() {
@@ -38,26 +37,25 @@ func setupSubscriber(app *cli.Cli) {
 
 func setupPublisher(app *cli.Cli) {
 	app.Command("pub", "publish to a topic", func(cmd *cli.Cmd) {
-		app.Spec = "--subject, --brokers"
+		app.Spec = "--subject, --brokerURL"
 		subject := cmd.String(cli.StringOpt{
 			Name: "subject, s",
 			Desc: "Subject to subscribe to",
 		})
 
-		brokers := cmd.Strings(cli.StringsOpt{
-			Name: "brokers, b",
+		brokerURL := cmd.String(cli.StringOpt{
+			Name: "brokerURL, b",
 			Desc: "Brokers to connect to",
 		})
 		cmd.Action = func() {
-			publish(*brokers, *subject)
+			publish(*brokerURL, *subject)
 		}
 	})
 }
 
-func publish(brokers []string, subject string) {
-	brokerList := strings.Join(brokers, ",")
-	log.Printf("Connecting to %v\n", brokerList)
-	natsConnection, err := nats.Connect("nats://" + brokerList)
+func publish(brokerURL string, subject string) {
+	log.Printf("Connecting to %v\n", brokerURL)
+	natsConnection, err := nats.Connect(brokerURL)
 	if err != nil {
 		log.Fatalf("Unable to connect. %v", err)
 	}
@@ -68,10 +66,9 @@ func publish(brokers []string, subject string) {
 	}
 }
 
-func subscribe(brokers []string, subject string) {
-	brokerList := strings.Join(brokers, ",")
-	log.Printf("Connecting to %v\n", brokerList)
-	natsConnection, err := nats.Connect("nats://" + brokerList)
+func subscribe(brokerURL string, subject string) {
+	log.Printf("Connecting to %v\n", brokerURL)
+	natsConnection, err := nats.Connect(brokerURL)
 	if err != nil {
 		log.Fatalf("Unable to connect. %v", err)
 	}
