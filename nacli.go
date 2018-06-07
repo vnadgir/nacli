@@ -2,98 +2,166 @@ package main
 
 import (
 	"bufio"
+	"fmt"
 	"log"
 	"os"
-	"strings"
+	"os/signal"
 
 	"github.com/google/uuid"
 	"github.com/jawher/mow.cli"
 	"github.com/nats-io/go-nats"
 	stan "github.com/nats-io/go-nats-streaming"
+	"github.com/nats-io/go-nats-streaming/pb"
 )
 
 func main() {
 	app := cli.App("nacli", "command line interface to work with nats")
-	setupSubscriber(app)
-	setupPublisher(app)
+
+	isStan := app.Bool(cli.BoolOpt{
+		Name:  "streaming s",
+		Desc:  "Connects to streaing server if true",
+		Value: true,
+	})
+
+	setupSubscriber(app, isStan)
+	setupPublisher(app, isStan)
 	app.Run(os.Args)
+
+	signalChan := make(chan os.Signal, 1)
+	cleanupDone := make(chan bool)
+	signal.Notify(signalChan, os.Interrupt)
+
+	go func() {
+		for range signalChan {
+			fmt.Printf("\nReceived an interrupt, closing connection...\n\n")
+			cleanupDone <- true
+		}
+	}()
+	<-cleanupDone
 }
 
-func setupSubscriber(app *cli.Cli) {
+func setupSubscriber(app *cli.Cli, isStan *bool) {
 	app.Command("sub", "subscribe to a topic", func(cmd *cli.Cmd) {
-		app.Spec = "--subject, --brokerURL --clusterID"
+		cmd.Spec = "--subject --brokerURL --clusterID"
 		subject := cmd.String(cli.StringOpt{
-			Name: "subject, s",
+			Name: "subject s",
 			Desc: "Subject to subscribe to",
 		})
 
 		brokers := cmd.String(cli.StringOpt{
-			Name: "brokerURL, b",
+			Name: "brokerURL b",
 			Desc: "Brokers to connect to",
 		})
 
 		clusterID := cmd.String(cli.StringOpt{
-			Name: "clusterID, c",
+			Name: "clusterID c",
 			Desc: "clusterID to connect to",
 		})
+
+		fromBeginning := cmd.Bool(cli.BoolOpt{
+			Name:  "from-beginning f",
+			Desc:  "subscribe from the beginning of time",
+			Value: true,
+		})
 		cmd.Action = func() {
-			subscribe(*brokers, *subject, *clusterID)
+			subscribe(*brokers, *subject, *clusterID, *isStan, *fromBeginning)
 		}
 	})
 }
 
-func setupPublisher(app *cli.Cli) {
+func setupPublisher(app *cli.Cli, isStan *bool) {
 	app.Command("pub", "publish to a topic", func(cmd *cli.Cmd) {
-		app.Spec = "--subject, --brokerURL"
+		cmd.Spec = "--subject --brokerURL --clusterID"
 		subject := cmd.String(cli.StringOpt{
-			Name: "subject, s",
+			Name: "subject s",
 			Desc: "Subject to subscribe to",
 		})
 
 		brokerURL := cmd.String(cli.StringOpt{
-			Name: "brokerURL, b",
+			Name: "brokerURL b",
 			Desc: "Brokers to connect to",
 		})
+
+		clusterID := cmd.String(cli.StringOpt{
+			Name: "clusterID c",
+			Desc: "clusterID to connect to",
+		})
 		cmd.Action = func() {
-			publish(*brokerURL, *subject)
+			publish(*brokerURL, *subject, *clusterID, *isStan)
 		}
 	})
 }
 
-func publish(brokerURL string, subject string) {
+func publish(brokerURL string, subject string, clusterID string, isStan bool) {
 	log.Printf("Connecting to %v\n", brokerURL)
-	natsConnection, err := nats.Connect(brokerURL)
-	if err != nil {
-		log.Fatalf("Unable to connect. %v", err)
-	}
-
-	s := bufio.NewScanner(os.Stdin)
-	for s.Scan() {
-		natsConnection.Publish(subject, []byte(s.Text()))
-	}
-}
-
-func subscribe(brokerURL string, subject string, clusterID string) {
-	log.Printf("Connecting to %v\n", brokerURL)
-
-	if strings.HasPrefix(brokerURL, "nats://") {
+	if !isStan {
 		natsConnection, err := nats.Connect(brokerURL)
 		if err != nil {
 			log.Fatalf("Unable to connect. %v", err)
 		}
-		log.Printf("Subscribing to subject '%v'\n", subject)
-		natsConnection.QueueSubscribe(subject, uuid.New().String(), func(msg *nats.Msg) {
-			log.Printf("%s\n", string(msg.Data))
-		})
+		defer natsConnection.Close()
 
-	} else if strings.HasPrefix(brokerURL, "stan://") {
+		s := bufio.NewScanner(os.Stdin)
+		for s.Scan() {
+			natsConnection.Publish(subject, []byte(s.Text()))
+		}
+
+	} else {
 		natsConnection, err := stan.Connect(clusterID, uuid.New().String(), stan.NatsURL(brokerURL))
 		if err != nil {
 			log.Fatalf("Unable to connect. %v", err)
 		}
-		natsConnection.QueueSubscribe(subject, uuid.New().String(), func(msg *stan.Msg) {
+		defer natsConnection.Close()
+
+		s := bufio.NewScanner(os.Stdin)
+		for s.Scan() {
+			natsConnection.Publish(subject, []byte(s.Text()))
+		}
+	}
+}
+
+func subscribe(brokerURL string, subject string, clusterID string, isStan bool, fromBeginning bool) {
+	log.Printf("Connecting to %v\n", brokerURL)
+
+	if !isStan {
+		natsConnection, err := nats.Connect(brokerURL)
+		if err != nil {
+			log.Fatalf("Unable to connect. %v", err)
+		}
+
+		defer natsConnection.Close()
+
+		log.Printf("Subscribing to subject '%v'\n", subject)
+
+		sub, err := natsConnection.QueueSubscribe(subject, uuid.New().String(), func(msg *nats.Msg) {
 			log.Printf("%s\n", string(msg.Data))
-		}, stan.StartWithLastReceived())
+		})
+		if err != nil {
+			panic(err)
+		}
+		defer sub.Unsubscribe()
+
+	} else {
+		natsConnection, err := stan.Connect(clusterID, uuid.New().String(), stan.NatsURL(brokerURL))
+		if err != nil {
+			log.Fatalf("Unable to connect. %v", err)
+		}
+
+		defer natsConnection.Close()
+		var startPos pb.StartPosition
+		if fromBeginning {
+			startPos = pb.StartPosition_First
+		} else {
+			startPos = pb.StartPosition_LastReceived
+		}
+
+		sub, err := natsConnection.QueueSubscribe(subject, uuid.New().String(), func(msg *stan.Msg) {
+			log.Printf("%s\n", msg.String())
+		}, stan.StartAt(startPos))
+		if err != nil {
+			panic(err)
+		}
+		defer sub.Unsubscribe()
 	}
 
 }
