@@ -25,6 +25,7 @@ func main() {
 
 	setupSubscriber(app, isStan)
 	setupPublisher(app, isStan)
+	setupctl(app)
 	app.Run(os.Args)
 
 	signalChan := make(chan os.Signal, 1)
@@ -40,11 +41,34 @@ func main() {
 	<-cleanupDone
 }
 
+func setupctl(app *cli.Cli) {
+	app.Command("ctl", "control plane for nats", func(cmd *cli.Cmd) {
+		cmd.Command("routes", "routes on nats", func(cmd *cli.Cmd) {
+			cmd.Action = func() {
+				log.Printf("Listing route info\n")
+			}
+		})
+
+		cmd.Command("subs", "subscriptions on nats", func(cmd *cli.Cmd) {
+			cmd.Action = func() {
+				log.Printf("Listing subscriptions info\n")
+			}
+		})
+
+		cmd.Command("offsets", "offsets on nats", func(cmd *cli.Cmd) {
+			cmd.Action = func() {
+				log.Printf("Listing Offsets info\n")
+			}
+		})
+
+	})
+}
+
 func setupSubscriber(app *cli.Cli, isStan *bool) {
 	app.Command("sub", "subscribe to a topic", func(cmd *cli.Cmd) {
-		cmd.Spec = "--subject --brokerURL --clusterID"
+		cmd.Spec = "--topic --brokerURL --clusterID --from-beginning --persistent"
 		subject := cmd.String(cli.StringOpt{
-			Name: "subject s",
+			Name: "topic t",
 			Desc: "Subject to subscribe to",
 		})
 
@@ -63,17 +87,22 @@ func setupSubscriber(app *cli.Cli, isStan *bool) {
 			Desc:  "subscribe from the beginning of time",
 			Value: true,
 		})
+
+		persistent := cmd.String(cli.StringOpt{
+			Name: "persistent p",
+			Desc: "Keep the subscription persistent and dont kill the subscription",
+		})
 		cmd.Action = func() {
-			subscribe(*brokers, *subject, *clusterID, *isStan, *fromBeginning)
+			subscribe(*brokers, *subject, *clusterID, *isStan, *fromBeginning, persistent)
 		}
 	})
 }
 
 func setupPublisher(app *cli.Cli, isStan *bool) {
 	app.Command("pub", "publish to a topic", func(cmd *cli.Cmd) {
-		cmd.Spec = "--subject --brokerURL --clusterID"
+		cmd.Spec = "--topic --brokerURL --clusterID"
 		subject := cmd.String(cli.StringOpt{
-			Name: "subject s",
+			Name: "topic t",
 			Desc: "Subject to subscribe to",
 		})
 
@@ -120,7 +149,7 @@ func publish(brokerURL string, subject string, clusterID string, isStan bool) {
 	}
 }
 
-func subscribe(brokerURL string, subject string, clusterID string, isStan bool, fromBeginning bool) {
+func subscribe(brokerURL string, subject string, clusterID string, isStan bool, fromBeginning bool, persistentName *string) {
 	log.Printf("Connecting to %v\n", brokerURL)
 
 	if !isStan {
@@ -129,17 +158,17 @@ func subscribe(brokerURL string, subject string, clusterID string, isStan bool, 
 			log.Fatalf("Unable to connect. %v", err)
 		}
 
-		defer natsConnection.Close()
+		//defer natsConnection.Close()
 
 		log.Printf("Subscribing to subject '%v'\n", subject)
 
-		sub, err := natsConnection.QueueSubscribe(subject, uuid.New().String(), func(msg *nats.Msg) {
+		_, err = natsConnection.QueueSubscribe(subject, uuid.New().String(), func(msg *nats.Msg) {
 			log.Printf("%s\n", string(msg.Data))
 		})
 		if err != nil {
 			panic(err)
 		}
-		defer sub.Unsubscribe()
+		//defer sub.Unsubscribe()
 
 	} else {
 		natsConnection, err := stan.Connect(clusterID, uuid.New().String(), stan.NatsURL(brokerURL))
@@ -147,7 +176,7 @@ func subscribe(brokerURL string, subject string, clusterID string, isStan bool, 
 			log.Fatalf("Unable to connect. %v", err)
 		}
 
-		defer natsConnection.Close()
+		//defer natsConnection.Close()
 		var startPos pb.StartPosition
 		if fromBeginning {
 			startPos = pb.StartPosition_First
@@ -155,13 +184,13 @@ func subscribe(brokerURL string, subject string, clusterID string, isStan bool, 
 			startPos = pb.StartPosition_LastReceived
 		}
 
-		sub, err := natsConnection.QueueSubscribe(subject, uuid.New().String(), func(msg *stan.Msg) {
+		_, err = natsConnection.QueueSubscribe(subject, uuid.New().String(), func(msg *stan.Msg) {
 			log.Printf("%s\n", msg.String())
 		}, stan.StartAt(startPos))
 		if err != nil {
 			panic(err)
 		}
-		defer sub.Unsubscribe()
+		//defer sub.Unsubscribe()
 	}
 
 }
