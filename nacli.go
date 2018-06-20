@@ -45,6 +45,7 @@ func setupctl(app *cli.Cli) {
 	app.Command("ctl", "control plane for nats", func(cmd *cli.Cmd) {
 		cmd.Command("routes", "routes on nats", func(cmd *cli.Cmd) {
 			cmd.Action = func() {
+
 				log.Printf("Listing route info\n")
 			}
 		})
@@ -52,12 +53,6 @@ func setupctl(app *cli.Cli) {
 		cmd.Command("subs", "subscriptions on nats", func(cmd *cli.Cmd) {
 			cmd.Action = func() {
 				log.Printf("Listing subscriptions info\n")
-			}
-		})
-
-		cmd.Command("offsets", "offsets on nats", func(cmd *cli.Cmd) {
-			cmd.Action = func() {
-				log.Printf("Listing Offsets info\n")
 			}
 		})
 
